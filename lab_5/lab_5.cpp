@@ -82,35 +82,23 @@ struct WindowSettings {
     }
 
     void mmapSave() const {
-        auto file_handle = CreateFile(
-            L"CONFIG",
-            GENERIC_READ | GENERIC_WRITE,
-            0,
-            nullptr,
-            CREATE_ALWAYS,
-            FILE_ATTRIBUTE_NORMAL,
-            nullptr);
+        auto h_file = CreateFile(L"CONFIG", GENERIC_READ | GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+            FILE_ATTRIBUTE_NORMAL, nullptr);
 
-        auto file_mapping = CreateFileMapping(
-            file_handle,
-            nullptr,
-            PAGE_READWRITE,
-            0,
-            sizeof(WindowSettings),
-            nullptr);
+        auto mapping = CreateFileMapping(h_file, nullptr, PAGE_READWRITE, 0, sizeof(WindowSettings), nullptr);
 
-        auto settings_data = (WindowSettings*)MapViewOfFile(file_mapping, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0,
+        auto data = (WindowSettings*)MapViewOfFile(mapping, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0,
             sizeof(WindowSettings));
 
-        memcpy(settings_data, (void*)this, sizeof(WindowSettings));
+        memcpy(data, (void*)this, sizeof(WindowSettings));
 
-        UnmapViewOfFile(settings_data);
-        CloseHandle(file_mapping);
-        CloseHandle(file_handle);
+        UnmapViewOfFile(data);
+        CloseHandle(mapping);
+        CloseHandle(h_file);
     }
 
     void mmapLoad() {
-        auto file_handle = CreateFile(
+        auto h_file = CreateFile(
             L"CONFIG",
             GENERIC_READ,
             0,
@@ -119,39 +107,38 @@ struct WindowSettings {
             FILE_ATTRIBUTE_NORMAL,
             nullptr);
 
-        auto file_mapping = CreateFileMapping(
-            file_handle,
+        auto mapping = CreateFileMapping(
+            h_file,
             nullptr,
             PAGE_READONLY,
             0,
             sizeof(WindowSettings),
             nullptr);
 
-        auto settings_data = (WindowSettings*)MapViewOfFile(file_mapping, FILE_MAP_READ, 0, 0,
-            sizeof(WindowSettings));
+        auto data = (WindowSettings*)MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, sizeof(WindowSettings));
 
-        memcpy((void*)this, settings_data, sizeof(WindowSettings));
+        memcpy((void*)this, data, sizeof(WindowSettings));
 
-        UnmapViewOfFile(settings_data);
-        CloseHandle(file_mapping);
-        CloseHandle(file_handle);
+        UnmapViewOfFile(data);
+        CloseHandle(mapping);
+        CloseHandle(h_file);
     }
 
     void posixSave() const {
-        FILE* file_descriptor;
-        errno_t error = fopen_s(&file_descriptor, "CONFIG", "wb");
+        FILE* fd;
+        errno_t error = fopen_s(&fd, "CONFIG", "wb");
         if (error == 0) {
-            fwrite(this, sizeof(WindowSettings), 1, file_descriptor);
-            fclose(file_descriptor);
+            fwrite(this, sizeof(WindowSettings), 1, fd);
+            fclose(fd);
         }
     }
 
     void posixLoad() {
-        FILE* file_descriptor;
-        errno_t error = fopen_s(&file_descriptor, "CONFIG", "rb");
+        FILE* fd;
+        errno_t error = fopen_s(&fd, "CONFIG", "rb");
         if (error == 0) {
-            fread(this, sizeof(WindowSettings), 1, file_descriptor);
-            fclose(file_descriptor);
+            fread(this, sizeof(WindowSettings), 1, fd);
+            fclose(fd);
         }
     }
 
@@ -178,7 +165,7 @@ struct WindowSettings {
     void winRead() {
         auto file_handle = CreateFile(L"CONFIG", GENERIC_READ, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL,
             nullptr);
-        ReadFile(file_handle, (LPVOID)this, sizeof(WindowSettings), nullptr, nullptr);
+        ReadFile(file_handle, (LPVOID) this, sizeof(WindowSettings), nullptr, nullptr);
         CloseHandle(file_handle);
     }
 
@@ -197,27 +184,27 @@ struct Board {
     int* lp_map_address;
     int shared_memory_size;
 
-    void pull() {
+    void pullData() {
         for (int i = 0; i < settings.N; ++i)
             memcpy(data[i].data(), lp_map_address + i * settings.N, sizeof(int) * settings.N);
     }
 
-    void push() {
+    void pushData() {
         for (int i = 0; i < settings.N; ++i)
             memcpy(lp_map_address + i * settings.N, data[i].data(), sizeof(int) * settings.N);
         PostMessage(HWND_BROADCAST, WM_FIELD_UPDATE, 0, 0);
 
     }
 
-    void init() {
+    void initData() {
         for (int i = 0; i < settings.N; ++i) { data.emplace_back(settings.N); }
         shared_memory_size = sizeof(UINT) * settings.N * settings.N;
         h_map_file = CreateFileMappingW(INVALID_HANDLE_VALUE,
             nullptr,
             PAGE_READWRITE, 0, shared_memory_size,
             shared_memory_name);
-        lp_map_address = (int*)MapViewOfFile(h_map_file, FILE_MAP_ALL_ACCESS, 0, 0, shared_memory_size);
-        pull();
+        lp_map_address = (int*) MapViewOfFile(h_map_file, FILE_MAP_ALL_ACCESS, 0, 0, shared_memory_size);
+        pullData();
     }
 
     void close() {
@@ -290,7 +277,7 @@ void drawBoard(HWND hwnd) {
 LRESULT CALLBACK window_proc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
     RECT rect = { 0 };
     if (message == WM_FIELD_UPDATE) {
-        board.pull();
+        board.pullData();
         InvalidateRect(hwnd, nullptr, TRUE);
         return 0;
     }
@@ -316,12 +303,12 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPar
 
     case WM_LBUTTONDOWN:
         board.data[LOWORD(lParam) * settings.N / width][HIWORD(lParam) * settings.N / height] = 1;
-        board.push();
+        board.pushData();
         return 0;
 
     case WM_RBUTTONDOWN:
         board.data[LOWORD(lParam) * settings.N / width][HIWORD(lParam) * settings.N / height] = 2;
-        board.push();
+        board.pushData();
         return 0;
 
     case WM_KEYDOWN:
@@ -376,7 +363,7 @@ LRESULT CALLBACK window_proc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPar
 }
 
 int loop() {
-    board.init();
+    board.initData();
 
     BOOL b_message_ok;
 
